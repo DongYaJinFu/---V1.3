@@ -1,0 +1,24 @@
+# 忽略特定扩展名的文件
+*.scvd
+*.bat
+*.uvguix.*
+*.uvoptx
+*.uvprojx
+*.json
+*.log
+*.lock
+*.dbgconf
+*.map
+*.lst
+*.crf
+*.d
+*.o
+*.iex
+*.Bak
+*.dep
+*.axf
+*.htm
+*.Inp
+*.sct
+
+
