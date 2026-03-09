@@ -1,6 +1,7 @@
 #include "stm32f10x.h"                  // Device header
 #include <stdio.h>
 #include <stdarg.h>
+#include "string.h"
 
 char Serial_RxPacket[100];				//定义接收数据包数组，数据包格式"@MSG\r\n"
 uint8_t Serial_RxFlag;					//定义接收数据包标志位
@@ -153,6 +154,7 @@ void Serial_Printf(char *format, ...)
 	Serial_SendString(String);		//串口发送字符数组（字符串）
 }
 
+#if 0
 /**
   * 函    数：USART1中断函数
   * 参    数：无
@@ -172,33 +174,65 @@ void USART1_IRQHandler(void)
 		/*使用状态机的思路，依次处理数据包的不同部分*/
 		
 		/*当前状态为0，接收数据包包头*/
-		if (RxState == 0)
+		if (RxState == waiting)
 		{
-			if (RxData == '@' && Serial_RxFlag == 0)		//如果数据确实是包头，并且上一个数据包已处理完毕
+			if (RxData == (strcmp(Serial_RxPacket, "NAME") == 0) && Serial_RxFlag == 0)		
 			{
-				RxState = 1;			//置下一个状态
+				RxState = name;			//置下一个状态
+				pRxPacket = 0;			//数据包的位置归零
+			}
+			if (RxData == (strcmp(Serial_RxPacket, "AGE") == 0) && Serial_RxFlag == 0)		
+			{
+				RxState = age;			//置下一个状态
+				pRxPacket = 0;			//数据包的位置归零
+			}
+			if (RxData == (strcmp(Serial_RxPacket, "SEX") == 0) && Serial_RxFlag == 0)		
+			{
+				RxState = sex;			//置下一个状态
 				pRxPacket = 0;			//数据包的位置归零
 			}
 		}
-		/*当前状态为1，接收数据包数据，同时判断是否接收到了第一个包尾*/
-		else if (RxState == 1)
+		else if (RxState == name)
 		{
 			if (RxData == '\r')			//如果收到第一个包尾
 			{
-				RxState = 2;			//置下一个状态
+				RxState = end;			//置下一个状态
 			}
 			else						//接收到了正常的数据
 			{
-				Serial_RxPacket[pRxPacket] = RxData;		//将数据存入数据包数组的指定位置
+				Serial_RxPacket_Name[pRxPacket] = RxData;		//将数据存入数据包数组的指定位置
 				pRxPacket ++;			//数据包的位置自增
 			}
 		}
-		/*当前状态为2，接收数据包第二个包尾*/
-		else if (RxState == 2)
+		else if (RxState == age)
+		{
+			if (RxData == '\r')			//如果收到第一个包尾
+			{
+				RxState = end;			//置下一个状态
+			}
+			else						//接收到了正常的数据
+			{
+				Serial_RxPacket_Age[pRxPacket] = RxData;		//将数据存入数据包数组的指定位置
+				pRxPacket ++;			//数据包的位置自增
+			}
+		}
+		else if (RxState == sex)
+		{
+			if (RxData == '\r')			//如果收到第一个包尾
+			{
+				RxState = end;			//置下一个状态
+			}
+			else						//接收到了正常的数据
+			{
+				Serial_RxPacket_Sex[pRxPacket] = RxData;		//将数据存入数据包数组的指定位置
+				pRxPacket ++;			//数据包的位置自增
+			}
+		}
+		else if (RxState == end)
 		{
 			if (RxData == '\n')			//如果收到第二个包尾
 			{
-				RxState = 0;			//状态归0
+				RxState = waiting;			//状态归0
 				Serial_RxPacket[pRxPacket] = '\0';			//将收到的字符数据包添加一个字符串结束标志
 				Serial_RxFlag = 1;		//接收数据包标志位置1，成功接收一个数据包
 			}
@@ -207,3 +241,6 @@ void USART1_IRQHandler(void)
 		USART_ClearITPendingBit(USART1, USART_IT_RXNE);		//清除标志位
 	}
 }
+#endif
+
+

@@ -1,5 +1,6 @@
 #include "stm32f10x.h"                  // Device header
 #include "Delay.h"
+#include "string.h"
 
 //外设的头文件
 #include "LED.h"
@@ -17,12 +18,34 @@
 #define ALARM_LOW  20      	    //滴速过低报警
 #define ALARM_HIGH 120     	    //滴速过高报警
 
-uint8_t  g_Drops_per_minute;      //滴速(每分钟多少滴)
+uint8_t  g_Drops_per_minute;    //滴速(每分钟多少滴)
 uint8_t  g_Bed_Num;		        //病床号
 uint8_t  Key_Num;		        //按键
 extern uint8_t  Beep_Active;    //蜂鸣器是否在工作
 extern uint16_t Beep_TimeCount; //计时
 extern uint8_t  Beep_State;     //当前开关状态
+char Serial_RxPacket_Name[10];  //存放名字
+uint8_t Serial_RxPacket_Age[1]; //存放年龄
+uint8_t Serial_RxPacket_Sex[1]; //存放性别
+
+//全局变量, 服务于串口任务与串口中断函数
+static uint8_t RxState = 0;		//定义表示当前状态机状态的静态变量
+static uint8_t pRxPacket = 0;	//定义表示当前接收数据位置的静态变量
+
+typedef enum Message
+{
+	waiting,
+	name,
+	age,
+	sex,
+	end
+}Message_t;
+
+typedef enum 
+{
+    SEX_FEMALE = 0,
+    SEX_MALE = 1
+}Sex_t;
 
 //start_task的任务配置
 #define START_TASK_PRIO           	   1
@@ -62,24 +85,32 @@ void SERIAL_TASK(void *pvParameters);
 
 typedef struct 
 {
+    char    Name[10];          //姓名
+    uint8_t Age;	    	   //年龄
+    uint8_t Sex;    		   //性别
+   	uint8_t Bed_Num;		   //病床号
 	uint8_t Drops_per_minute;  //滴速(每分钟多少滴)
-	uint8_t Bed_Num;		   //病床号
 	uint8_t Key_Num;		   //按键
 	uint8_t Alarm_type;		   //滴速警告类型, 0:正常, 1:过低, 2:过高
-}PatientData_t;
+} PatientData_t;
 
 //创建队列的句柄
 QueueHandle_t Patient_data_queue;
 QueueHandle_t Beep_control_queue;
+QueueHandle_t Rx_patientdata_queue;
 
 void freertos_demo(void)
 {
-	Patient_data_queue = xQueueCreate(5, sizeof(PatientData_t));
-	Beep_control_queue = xQueueCreate(3, sizeof(uint8_t));
-	
-	if(Patient_data_queue == NULL || 
-	   Beep_control_queue == NULL)
+    //创建队列
+	Patient_data_queue   = xQueueCreate(5, sizeof(PatientData_t));
+	Beep_control_queue   = xQueueCreate(1, sizeof(uint8_t));
+	Rx_patientdata_queue = xQueueCreate(5, sizeof(PatientData_t));
+
+	if(Patient_data_queue   == NULL || 
+	   Beep_control_queue   == NULL ||
+       Rx_patientdata_queue == NULL)
 	{
+        OLED_Clear();
 		OLED_Printf(0, 0, OLED_8X16, "Create queue error!");
 	}
 	
@@ -100,7 +131,7 @@ void freertos_demo(void)
 void start_task(void *pvParameters)
 {
     taskENTER_CRITICAL();           
-    								
+
     xTaskCreate((TaskFunction_t)    NRF24L01_TASK,
                 (char*)             "NRF24L01_TASK",
                 (uint16_t)          NRF24L01_TASK_STACK_SIZE,
@@ -108,34 +139,34 @@ void start_task(void *pvParameters)
                 (UBaseType_t)       NRF24L01_TASK_PRIO,
                 (TaskHandle_t*)     &NRF24L01_TASK_handler);
 
-     xTaskCreate((TaskFunction_t)   OLED_TASK,
+    xTaskCreate((TaskFunction_t)   OLED_TASK,
                 (char*)             "OLED_TASK",
                 (uint16_t)          OLED_TASK_STACK_SIZE,
                 (void*)             NULL,
                 (UBaseType_t)       OLED_TASK_PRIO,
                 (TaskHandle_t*)     &OLED_TASK_handler);      
 
-     xTaskCreate((TaskFunction_t)   BEEP_TASK,
+    xTaskCreate((TaskFunction_t)   BEEP_TASK,
                 (char*)             "BEEP_TASK",
                 (uint16_t)          BEEP_TASK_STACK_SIZE,
                 (void*)             NULL,
                 (UBaseType_t)       BEEP_TASK_PRIO,
                 (TaskHandle_t*)     &BEEP_TASK_handler);  
 
-     xTaskCreate((TaskFunction_t)   MONITOR_TASK,
+    xTaskCreate((TaskFunction_t)   MONITOR_TASK,
                 (char*)             "MONITOR_TASK",
                 (uint16_t)          MONITOR_TASK_STACK_SIZE,
                 (void*)             NULL,
                 (UBaseType_t)       MONITOR_TASK_PRIO,
                 (TaskHandle_t*)     &MONITOR_TASK_handler);  	
 
-     xTaskCreate((TaskFunction_t)   SERIAL_TASK,
+    xTaskCreate((TaskFunction_t)   SERIAL_TASK,
                 (char*)             "SERIAL_TASK",
                 (uint16_t)          SERIAL_TASK_STACK_SIZE,
                 (void*)             NULL,
                 (UBaseType_t)       SERIAL_TASK_PRIO,
                 (TaskHandle_t*)     &SERIAL_TASK_handler);				
-				
+
     vTaskDelete(start_task_handler);	
     taskEXIT_CRITICAL();            
 }
@@ -206,33 +237,39 @@ void OLED_TASK(void *pvParameters)
     const TickType_t UPDATE_INTERVAL = pdMS_TO_TICKS(100);
     
     while(1)
-    {
+    {        
+        OLED_Update();
         //只在数据更新时刷新OLED，减少不必要的刷新
         if((xTaskGetTickCount() - last_update_time) >= UPDATE_INTERVAL) 
 		{
 			if(xQueueReceive(Patient_data_queue, &PatientData_Receive, portMAX_DELAY) == pdTRUE)
 			{
-				OLED_Clear();
-				OLED_Printf(0, 0, OLED_6X8, "Bed num:");
-				OLED_Printf(0, 10, OLED_6X8, "Drip Rate:");
+				// OLED_Clear();
+				OLED_Printf(0, 0, OLED_6X8, "Name:");
+				OLED_Printf(0, 10, OLED_6X8, "Age:");
+				OLED_Printf(0, 20, OLED_6X8, "Sex:");
+				OLED_Printf(0, 30, OLED_6X8, "Bed num:");
+				OLED_Printf(0, 40, OLED_6X8, "Drip Rate:");
 				
-				OLED_ShowNum(50, 0, PatientData_Receive.Bed_Num, 1, OLED_6X8);
-				OLED_ShowNum(62, 10, PatientData_Receive.Drops_per_minute, 3, OLED_6X8);
+				OLED_ShowString(62, 0, PatientData_Receive.Name, OLED_6X8);
+				OLED_ShowNum(62, 10, PatientData_Receive.Age, 2, OLED_6X8);
+				OLED_ShowNum(62, 20, PatientData_Receive.Sex, 1, OLED_6X8);
+				OLED_ShowNum(62, 30, PatientData_Receive.Bed_Num, 1, OLED_6X8);
+				OLED_ShowNum(62, 40, PatientData_Receive.Drops_per_minute, 3, OLED_6X8);
 				
 				//显示报警状态
 				if(PatientData_Receive.Drops_per_minute > ALARM_HIGH) 
 				{
-					OLED_Printf(0, 20, OLED_6X8, "ALARM: HIGH");
+					OLED_Printf(0, 50, OLED_6X8, "ALARM: HIGH");
 				} 
 				else if(PatientData_Receive.Drops_per_minute < ALARM_LOW) 
 				{
-					OLED_Printf(0, 20, OLED_6X8, "ALARM: LOW");
+					OLED_Printf(0, 50, OLED_6X8, "ALARM: LOW");
 				}
             }
             OLED_Update();
             last_update_time = xTaskGetTickCount();
         }
-        
         vTaskDelay(pdMS_TO_TICKS(50));
 	}
 }
@@ -330,3 +367,115 @@ void MONITOR_TASK(void *pvParameters)
         }
     }
 }
+
+
+/*
+ * @brief  串口任务, 在PC端上输入患者的信息
+ * @param  无
+ * @retval 无
+ */
+void SERIAL_TASK(void *pvParameters)
+{
+    PatientData_t Rx_patientdata;
+	while(1)
+	{
+        if(Serial_RxFlag == 1)
+        {
+            //向Patient_data_queue队列里发送消息
+            strcpy(Rx_patientdata.Name, Serial_RxPacket_Name);
+            Rx_patientdata.Age = Serial_RxPacket_Age[pRxPacket];
+            Rx_patientdata.Sex = Serial_RxPacket_Sex[pRxPacket];
+            if(xQueueSend(Patient_data_queue, &Rx_patientdata, portMAX_DELAY) != pdTRUE)
+            {
+                OLED_Clear();
+                OLED_Printf(0, 0, OLED_6X8, "Error!");
+            }
+            Serial_RxFlag = 0;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+
+/*
+ * @brief  串口接收消息中断, 用于接收PC端通过串口发送病人的信息
+ * @param  无
+ * @retval 无
+ */
+void USART1_IRQHandler(void)
+{
+	if (USART_GetITStatus(USART1, USART_IT_RXNE) == SET)	//判断是否是USART1的接收事件触发的中断
+	{
+		uint8_t RxData = USART_ReceiveData(USART1);			//读取数据寄存器，存放在接收的数据变量
+		
+		/*使用状态机的思路，依次处理数据包的不同部分*/
+		
+		/*当前状态为0，接收数据包包头*/
+		if (RxState == waiting)
+		{
+			if (RxData == (strcmp(Serial_RxPacket, "NAME") == 0) && Serial_RxFlag == 0)		
+			{
+				RxState = name;			//置下一个状态
+				pRxPacket = 0;			//数据包的位置归零
+			}
+			if (RxData == (strcmp(Serial_RxPacket, "AGE") == 0) && Serial_RxFlag == 0)		
+			{
+				RxState = age;			//置下一个状态
+				pRxPacket = 0;			//数据包的位置归零
+			}
+			if (RxData == (strcmp(Serial_RxPacket, "SEX") == 0) && Serial_RxFlag == 0)		
+			{
+				RxState = sex;			//置下一个状态
+				pRxPacket = 0;			//数据包的位置归零
+			}
+		}
+		else if (RxState == name)
+		{
+			if (RxData == '\r')			//如果收到第一个包尾
+			{
+				RxState = end;			//置下一个状态
+			}
+			else						//接收到了正常的数据
+			{
+				Serial_RxPacket_Name[pRxPacket] = RxData;		//将数据存入数据包数组的指定位置
+				pRxPacket ++;			//数据包的位置自增
+			}
+		}
+		else if (RxState == age)
+		{
+			if (RxData == '\r')			//如果收到第一个包尾
+			{
+				RxState = end;			//置下一个状态
+			}
+			else						//接收到了正常的数据
+			{
+				Serial_RxPacket_Age[pRxPacket] = RxData;		//将数据存入数据包数组的指定位置
+				pRxPacket ++;			//数据包的位置自增
+			}
+		}
+		else if (RxState == sex)
+		{
+			if (RxData == '\r')			//如果收到第一个包尾
+			{
+				RxState = end;			//置下一个状态
+			}
+			else						//接收到了正常的数据
+			{
+				Serial_RxPacket_Sex[pRxPacket] = RxData;		//将数据存入数据包数组的指定位置
+				pRxPacket ++;			//数据包的位置自增
+			}
+		}
+		else if (RxState == end)
+		{
+			if (RxData == '\n')			//如果收到第二个包尾
+			{
+				RxState = waiting;			//状态归0
+				Serial_RxPacket[pRxPacket] = '\0';			//将收到的字符数据包添加一个字符串结束标志
+				Serial_RxFlag = 1;		//接收数据包标志位置1，成功接收一个数据包
+			}
+		}
+		
+		USART_ClearITPendingBit(USART1, USART_IT_RXNE);		//清除标志位
+	}
+}
+
