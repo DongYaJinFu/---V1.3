@@ -28,18 +28,20 @@ char Serial_RxPacket_Name[10];  //存放名字
 uint8_t Serial_RxPacket_Age[1]; //存放年龄
 uint8_t Serial_RxPacket_Sex[1]; //存放性别
 
-//全局变量, 服务于串口任务与串口中断函数
-static uint8_t RxState = 0;		//定义表示当前状态机状态的静态变量
-static uint8_t pRxPacket = 0;	//定义表示当前接收数据位置的静态变量
+//定义串口中断函数里的包头字符串
+const char *HEADER_NAME = "NAME:";
+const char *HEADER_AGE = "AGE:";
+const char *HEADER_SEX = "SEX:";
 
-typedef enum Message
+enum
 {
-	waiting,
-	name,
-	age,
-	sex,
+	wait_header,
+	match_name,
+	match_age,
+	match_sex,
+	receive_data,
 	end
-}Message_t;
+};
 
 typedef enum 
 {
@@ -47,6 +49,7 @@ typedef enum
     SEX_MALE = 1
 }Sex_t;
 
+#if 1
 //start_task的任务配置
 #define START_TASK_PRIO           	   1
 #define START_TASK_STACK_SIZE     	   128
@@ -82,6 +85,7 @@ void MONITOR_TASK(void *pvParameters);
 #define SERIAL_TASK_STACK_SIZE         128
 TaskHandle_t SERIAL_TASK_handler;
 void SERIAL_TASK(void *pvParameters);
+#endif
 
 typedef struct 
 {
@@ -381,17 +385,8 @@ void SERIAL_TASK(void *pvParameters)
 	{
         if(Serial_RxFlag == 1)
         {
-            //向Patient_data_queue队列里发送消息
-            strcpy(Rx_patientdata.Name, Serial_RxPacket_Name);
-            Rx_patientdata.Age = Serial_RxPacket_Age[pRxPacket];
-            Rx_patientdata.Sex = Serial_RxPacket_Sex[pRxPacket];
-            if(xQueueSend(Patient_data_queue, &Rx_patientdata, portMAX_DELAY) != pdTRUE)
-            {
-                OLED_Clear();
-                OLED_Printf(0, 0, OLED_6X8, "Error!");
-            }
-            Serial_RxFlag = 0;
-        }
+			
+		}
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
@@ -408,73 +403,66 @@ void USART1_IRQHandler(void)
 	{
 		uint8_t RxData = USART_ReceiveData(USART1);			//读取数据寄存器，存放在接收的数据变量
 		
-		/*使用状态机的思路，依次处理数据包的不同部分*/
-		
-		/*当前状态为0，接收数据包包头*/
-		if (RxState == waiting)
+		static uint8_t RxState = wait_header;
+        static uint8_t pRxPacket = 0;
+        static uint8_t HeaderIndex = 0;      //包头匹配的索引
+        static uint8_t CurrentHeader = 0;    //当前匹配的包头类型 0:NAME, 1:AGE, 2:SEX
+
+		switch(RxState)
 		{
-			if (RxData == (strcmp(Serial_RxPacket, "NAME") == 0) && Serial_RxFlag == 0)		
-			{
-				RxState = name;			//置下一个状态
-				pRxPacket = 0;			//数据包的位置归零
-			}
-			if (RxData == (strcmp(Serial_RxPacket, "AGE") == 0) && Serial_RxFlag == 0)		
-			{
-				RxState = age;			//置下一个状态
-				pRxPacket = 0;			//数据包的位置归零
-			}
-			if (RxData == (strcmp(Serial_RxPacket, "SEX") == 0) && Serial_RxFlag == 0)		
-			{
-				RxState = sex;			//置下一个状态
-				pRxPacket = 0;			//数据包的位置归零
-			}
+			case wait_header:
+				//如果接收到第一个字符为'N', 就将当前包头的类型匹配为0, 并且状态转移至匹配name部分
+				if(RxData == 'N')
+				{
+					CurrentHeader = 0;
+					HeaderIndex = 1;
+					RxState = match_name;
+				}
+				break;
+			case match_name:
+				//如果来到匹配名字部分, 包头索引偏移1位, 如果偏移之后为'\0'说明匹配完成
+				HeaderIndex++;
+				if(HEADER_NAME[HeaderIndex] == '\0')
+				{
+					//进行状态转移并且将接收数据数组的指针指到数组的开头, 准备接收数据
+					RxState = receive_data;
+					pRxPacket = 0;
+				}
+				else
+                {
+                    RxState = wait_header;  //匹配失败，重新开始
+                }
+				break;
+			case receive_data:
+				if(RxData == '\r')
+				{
+					RxState = end;
+					Serial_RxPacket_Name[pRxPacket] = '\0';
+				}
+				else
+				{
+					switch(CurrentHeader)
+					{
+						case 1:
+							//这里用if的原因是, 每一次进来中断只能传入一个字符, 如果使用for循环的话, 偏移了之后就没有数据了
+							if(pRxPacket < sizeof(Serial_RxPacket_Name) - 1)
+							{
+								Serial_RxPacket_Name[pRxPacket] = RxData;
+								pRxPacket++;
+							}
+						break;
+					}
+				}
+				break;
+			case end:
+				//如果收到'\n'字符, 就将接收到数据的标志位置1, 并回到等到包头的状态
+				if(RxData == '\n')
+				{
+					Serial_RxFlag = 1;
+					RxState = wait_header;
+				}
+			break;
 		}
-		else if (RxState == name)
-		{
-			if (RxData == '\r')			//如果收到第一个包尾
-			{
-				RxState = end;			//置下一个状态
-			}
-			else						//接收到了正常的数据
-			{
-				Serial_RxPacket_Name[pRxPacket] = RxData;		//将数据存入数据包数组的指定位置
-				pRxPacket ++;			//数据包的位置自增
-			}
-		}
-		else if (RxState == age)
-		{
-			if (RxData == '\r')			//如果收到第一个包尾
-			{
-				RxState = end;			//置下一个状态
-			}
-			else						//接收到了正常的数据
-			{
-				Serial_RxPacket_Age[pRxPacket] = RxData;		//将数据存入数据包数组的指定位置
-				pRxPacket ++;			//数据包的位置自增
-			}
-		}
-		else if (RxState == sex)
-		{
-			if (RxData == '\r')			//如果收到第一个包尾
-			{
-				RxState = end;			//置下一个状态
-			}
-			else						//接收到了正常的数据
-			{
-				Serial_RxPacket_Sex[pRxPacket] = RxData;		//将数据存入数据包数组的指定位置
-				pRxPacket ++;			//数据包的位置自增
-			}
-		}
-		else if (RxState == end)
-		{
-			if (RxData == '\n')			//如果收到第二个包尾
-			{
-				RxState = waiting;			//状态归0
-				Serial_RxPacket[pRxPacket] = '\0';			//将收到的字符数据包添加一个字符串结束标志
-				Serial_RxFlag = 1;		//接收数据包标志位置1，成功接收一个数据包
-			}
-		}
-		
 		USART_ClearITPendingBit(USART1, USART_IT_RXNE);		//清除标志位
 	}
 }
