@@ -26,7 +26,7 @@ extern uint16_t Beep_TimeCount; //计时
 extern uint8_t  Beep_State;     //当前开关状态
 char Serial_RxPacket_Name[10];  //存放名字
 uint8_t Serial_RxPacket_Age[1]; //存放年龄
-uint8_t Serial_RxPacket_Sex[1]; //存放性别
+char Serial_RxPacket_Sex[8];    //存放性别
 
 //定义串口中断函数里的包头字符串
 const char *HEADER_NAME = "NAME:";
@@ -42,12 +42,6 @@ enum
 	receive_data,
 	end
 };
-
-typedef enum 
-{
-    SEX_FEMALE = 0,
-    SEX_MALE = 1
-}Sex_t;
 
 #if 1
 //start_task的任务配置
@@ -91,7 +85,7 @@ typedef struct
 {
     char    Name[10];          //姓名
     uint8_t Age;	    	   //年龄
-    uint8_t Sex;    		   //性别
+    char    Sex[8];    		   //性别
    	uint8_t Bed_Num;		   //病床号
 	uint8_t Drops_per_minute;  //滴速(每分钟多少滴)
 	uint8_t Key_Num;		   //按键
@@ -246,18 +240,27 @@ void OLED_TASK(void *pvParameters)
         //只在数据更新时刷新OLED，减少不必要的刷新
         if((xTaskGetTickCount() - last_update_time) >= UPDATE_INTERVAL) 
 		{
+			if(Serial_RxFlag == 1)
+			{
+				OLED_Printf(62, 0,  OLED_6X8, "           ");
+				OLED_Printf(62, 10, OLED_6X8, "           ");
+				OLED_Printf(62, 20, OLED_6X8, "           ");
+				OLED_ShowString(62, 0, Serial_RxPacket_Name, OLED_6X8);
+				OLED_ShowNum(62, 10, *Serial_RxPacket_Age, 2, OLED_6X8);
+				OLED_ShowString(62, 20, Serial_RxPacket_Sex, OLED_6X8);
+				Serial_RxFlag = 0;
+			}
 			if(xQueueReceive(Patient_data_queue, &PatientData_Receive, portMAX_DELAY) == pdTRUE)
 			{
-				// OLED_Clear();
 				OLED_Printf(0, 0, OLED_6X8, "Name:");
 				OLED_Printf(0, 10, OLED_6X8, "Age:");
 				OLED_Printf(0, 20, OLED_6X8, "Sex:");
 				OLED_Printf(0, 30, OLED_6X8, "Bed num:");
 				OLED_Printf(0, 40, OLED_6X8, "Drip Rate:");
 				
-				OLED_ShowString(62, 0, PatientData_Receive.Name, OLED_6X8);
-				OLED_ShowNum(62, 10, PatientData_Receive.Age, 2, OLED_6X8);
-				OLED_ShowNum(62, 20, PatientData_Receive.Sex, 1, OLED_6X8);
+				// OLED_ShowString(62, 0, PatientData_Receive.Name, OLED_6X8);
+				// OLED_ShowNum(62, 10, PatientData_Receive.Age, 2, OLED_6X8);
+				// OLED_ShowNum(62, 20, PatientData_Receive.Sex, 1, OLED_6X8);
 				OLED_ShowNum(62, 30, PatientData_Receive.Bed_Num, 1, OLED_6X8);
 				OLED_ShowNum(62, 40, PatientData_Receive.Drops_per_minute, 3, OLED_6X8);
 				
@@ -268,6 +271,7 @@ void OLED_TASK(void *pvParameters)
 				} 
 				else if(PatientData_Receive.Drops_per_minute < ALARM_LOW) 
 				{
+					OLED_Printf(0, 50, OLED_6X8, "           ");
 					OLED_Printf(0, 50, OLED_6X8, "ALARM: LOW");
 				}
             }
@@ -407,6 +411,7 @@ void USART1_IRQHandler(void)
         static uint8_t pRxPacket = 0;
         static uint8_t HeaderIndex = 0;      //包头匹配的索引
         static uint8_t CurrentHeader = 0;    //当前匹配的包头类型 0:NAME, 1:AGE, 2:SEX
+		static uint8_t age_temp = 0;
 
 		switch(RxState)
 		{
@@ -418,15 +423,62 @@ void USART1_IRQHandler(void)
 					HeaderIndex = 1;
 					RxState = match_name;
 				}
+				if(RxData == 'A')
+				{
+					CurrentHeader = 1;
+					HeaderIndex = 1;
+					RxState = match_age;
+				}
+				if(RxData == 'S')
+				{
+					CurrentHeader = 2;
+					HeaderIndex = 1;
+					RxState = match_sex;
+				}
 				break;
 			case match_name:
-				//如果来到匹配名字部分, 包头索引偏移1位, 如果偏移之后为'\0'说明匹配完成
-				HeaderIndex++;
-				if(HEADER_NAME[HeaderIndex] == '\0')
+				if(RxData == HEADER_NAME[HeaderIndex])
 				{
+					HeaderIndex++;
 					//进行状态转移并且将接收数据数组的指针指到数组的开头, 准备接收数据
-					RxState = receive_data;
-					pRxPacket = 0;
+					if(HEADER_NAME[HeaderIndex] == '\0')
+                    {
+                        RxState = receive_data;
+                        pRxPacket = 0;
+                    }
+				}
+				else
+                {
+                    RxState = wait_header;  //匹配失败，重新开始
+                }
+				break;
+			case match_age:
+				if(RxData == HEADER_AGE[HeaderIndex])
+				{
+					HeaderIndex++;
+					//进行状态转移并且将接收数据数组的指针指到数组的开头, 准备接收数据
+					if(HEADER_AGE[HeaderIndex] == '\0')
+                    {
+                        RxState = receive_data;
+                        pRxPacket = 0;
+						age_temp = 0; 
+                    }
+				}
+				else
+                {
+                    RxState = wait_header;  //匹配失败，重新开始
+                }
+				break;
+			case match_sex:
+				if(RxData == HEADER_SEX[HeaderIndex])
+				{
+					HeaderIndex++;
+					//进行状态转移并且将接收数据数组的指针指到数组的开头, 准备接收数据
+					if(HEADER_SEX[HeaderIndex] == '\0')
+                    {
+                        RxState = receive_data;
+                        pRxPacket = 0;
+                    }
 				}
 				else
                 {
@@ -437,20 +489,48 @@ void USART1_IRQHandler(void)
 				if(RxData == '\r')
 				{
 					RxState = end;
-					Serial_RxPacket_Name[pRxPacket] = '\0';
+					switch(CurrentHeader)
+                    {
+						case 0:
+							Serial_RxPacket_Name[pRxPacket] = '\0';
+						break;
+						case 1:
+							Serial_RxPacket_Age[0] = age_temp;
+							Serial_RxPacket_Age[pRxPacket] = '\0';
+							age_temp = 0; 
+						break;
+						case 2:
+							Serial_RxPacket_Sex[pRxPacket] = '\0';
+						break;
+					}
 				}
 				else
 				{
 					switch(CurrentHeader)
 					{
-						case 1:
+						case 0:
 							//这里用if的原因是, 每一次进来中断只能传入一个字符, 如果使用for循环的话, 偏移了之后就没有数据了
 							if(pRxPacket < sizeof(Serial_RxPacket_Name) - 1)
 							{
 								Serial_RxPacket_Name[pRxPacket] = RxData;
 								pRxPacket++;
 							}
-						break;
+							break;
+						case 1:
+                            if(RxData >= '0' && RxData <= '9')
+                            {
+    						    age_temp = age_temp * 10 + (RxData - '0');
+							}
+							pRxPacket++;
+							break;
+						case 2:
+							//这里用if的原因是, 每一次进来中断只能传入一个字符, 如果使用for循环的话, 偏移了之后就没有数据了
+							if(pRxPacket < sizeof(Serial_RxPacket_Sex) - 1)
+							{
+								Serial_RxPacket_Sex[pRxPacket] = RxData;
+								pRxPacket++;
+							}
+							break;
 					}
 				}
 				break;
@@ -461,7 +541,7 @@ void USART1_IRQHandler(void)
 					Serial_RxFlag = 1;
 					RxState = wait_header;
 				}
-			break;
+				break;
 		}
 		USART_ClearITPendingBit(USART1, USART_IT_RXNE);		//清除标志位
 	}
