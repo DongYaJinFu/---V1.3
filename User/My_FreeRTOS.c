@@ -92,26 +92,45 @@ typedef struct
 	uint8_t Alarm_type;		   //滴速警告类型, 0:正常, 1:过低, 2:过高
 } PatientData_t;
 
+//创建队列集的句柄
+QueueSetHandle_t queueSet_handle;
+
 //创建队列的句柄
-QueueHandle_t Patient_data_queue;
-QueueHandle_t Beep_control_queue;
-QueueHandle_t Rx_patientdata_queue;
+QueueHandle_t Patient_data_queue;		//NFR24L01发送的数据
+QueueHandle_t Rx_patientdata_queue;		//串口发送的数据
+QueueHandle_t Beep_control_queue;		//用于给蜂鸣器任务发出信号
+QueueHandle_t Alarm_type_queue;			//用于给监控任务发出信号
 
 void freertos_demo(void)
 {
+	//创建队列集
+	queueSet_handle = xQueueCreateSet(2);
+
+	if(queueSet_handle == NULL)
+	{
+		OLED_Clear();
+		OLED_Printf(0, 0, OLED_8X16, "Create queueset error!");
+	}
+
     //创建队列
 	Patient_data_queue   = xQueueCreate(5, sizeof(PatientData_t));
-	Beep_control_queue   = xQueueCreate(1, sizeof(uint8_t));
 	Rx_patientdata_queue = xQueueCreate(5, sizeof(PatientData_t));
+	Beep_control_queue   = xQueueCreate(1, sizeof(uint8_t));
+	Alarm_type_queue     = xQueueCreate(1, sizeof(uint8_t));
 
-	if(Patient_data_queue   == NULL || 
-	   Beep_control_queue   == NULL ||
-       Rx_patientdata_queue == NULL)
+	if( Patient_data_queue   == NULL || 
+		Rx_patientdata_queue == NULL ||
+		Beep_control_queue   == NULL ||
+		Alarm_type_queue     == NULL)
 	{
         OLED_Clear();
 		OLED_Printf(0, 0, OLED_8X16, "Create queue error!");
 	}
-	
+
+	//把两个队列添加入队列集里
+	xQueueAddToSet(Patient_data_queue, queueSet_handle);
+	xQueueAddToSet(Rx_patientdata_queue, queueSet_handle);
+
     xTaskCreate((TaskFunction_t)    start_task,
                 (char*)             "start_task",
                 (uint16_t)          START_TASK_STACK_SIZE,
@@ -177,6 +196,8 @@ void start_task(void *pvParameters)
 void NRF24L01_TASK(void *pvParameters)
 {
 	PatientData_t patient_data;
+	uint8_t alarm_type;
+
 	while(1)
 	{
 		if(NRF24L01_Receive() == 1)		
@@ -198,7 +219,10 @@ void NRF24L01_TASK(void *pvParameters)
 			{
                 patient_data.Alarm_type = 0;
             }
-			
+			//将警报类型发送到警报类型的队列里去
+			alarm_type = patient_data.Alarm_type;
+			xQueueSend(Alarm_type_queue, &alarm_type, 0);
+
 			//将结构体patient_data里的数据写到名字为Patient_data_queue的队列里, 并等待时长为:portMAX_DELAY
 			if(xQueueSend(Patient_data_queue, &patient_data, portMAX_DELAY) != pdTRUE)
 			{
@@ -232,15 +256,53 @@ void OLED_TASK(void *pvParameters)
 {
     uint32_t last_update_time = 0;
 	PatientData_t PatientData_Receive;
+	PatientData_t Rx_patientdata_Receive;
     const TickType_t UPDATE_INTERVAL = pdMS_TO_TICKS(100);
+	
+	//在队列集中选中对应的队列的句柄
+	QueueSetMemberHandle_t member_handle; 
     
+	OLED_Printf(0, 0, OLED_6X8, "Name:");
+	OLED_Printf(0, 10, OLED_6X8, "Age:");
+	OLED_Printf(0, 20, OLED_6X8, "Sex:");
+	OLED_Printf(0, 30, OLED_6X8, "Bed num:");
+	OLED_Printf(0, 40, OLED_6X8, "Drip Rate:");
+
     while(1)
-    {        
-        OLED_Update();
-        //只在数据更新时刷新OLED，减少不必要的刷新
-        if((xTaskGetTickCount() - last_update_time) >= UPDATE_INTERVAL) 
+    {    
+		//从队列集中获取有效信息
+		member_handle = xQueueSelectFromSet(queueSet_handle, pdMS_TO_TICKS(100));
+
+		if(member_handle == Patient_data_queue)
 		{
-			if(Serial_RxFlag == 1)
+			if(xQueueReceive(Patient_data_queue, &PatientData_Receive, 0) == pdTRUE)
+			{
+				g_Drops_per_minute = PatientData_Receive.Drops_per_minute;
+				OLED_ShowNum(62, 30, PatientData_Receive.Bed_Num, 1, OLED_6X8);
+				OLED_ShowNum(62, 40, PatientData_Receive.Drops_per_minute, 3, OLED_6X8);
+				
+				//显示报警状态
+				if(PatientData_Receive.Drops_per_minute > ALARM_HIGH) 
+				{
+					OLED_Printf(0, 50, OLED_6X8, "                ");
+					OLED_Printf(0, 50, OLED_6X8, "ALARM: HIGH");
+				} 
+				else if(PatientData_Receive.Drops_per_minute < ALARM_LOW) 
+				{
+					OLED_Printf(0, 50, OLED_6X8, "                ");
+					OLED_Printf(0, 50, OLED_6X8, "ALARM: LOW");
+				}
+				else
+				{
+					OLED_Printf(0, 50, OLED_6X8, "                ");
+					OLED_Printf(0, 50, OLED_6X8, "Normal speed");
+				}
+			}
+        }
+		//如果是返回的句柄是来自串口的数据, 就执行以下操作
+		else if(member_handle == Rx_patientdata_queue)
+		{
+			if(xQueueReceive(Rx_patientdata_queue, &Rx_patientdata_Receive, 0) == pdTRUE)
 			{
 				OLED_Printf(62, 0,  OLED_6X8, "           ");
 				OLED_Printf(62, 10, OLED_6X8, "           ");
@@ -248,37 +310,16 @@ void OLED_TASK(void *pvParameters)
 				OLED_ShowString(62, 0, Serial_RxPacket_Name, OLED_6X8);
 				OLED_ShowNum(62, 10, *Serial_RxPacket_Age, 2, OLED_6X8);
 				OLED_ShowString(62, 20, Serial_RxPacket_Sex, OLED_6X8);
-				Serial_RxFlag = 0;
 			}
-			if(xQueueReceive(Patient_data_queue, &PatientData_Receive, portMAX_DELAY) == pdTRUE)
-			{
-				OLED_Printf(0, 0, OLED_6X8, "Name:");
-				OLED_Printf(0, 10, OLED_6X8, "Age:");
-				OLED_Printf(0, 20, OLED_6X8, "Sex:");
-				OLED_Printf(0, 30, OLED_6X8, "Bed num:");
-				OLED_Printf(0, 40, OLED_6X8, "Drip Rate:");
-				
-				// OLED_ShowString(62, 0, PatientData_Receive.Name, OLED_6X8);
-				// OLED_ShowNum(62, 10, PatientData_Receive.Age, 2, OLED_6X8);
-				// OLED_ShowNum(62, 20, PatientData_Receive.Sex, 1, OLED_6X8);
-				OLED_ShowNum(62, 30, PatientData_Receive.Bed_Num, 1, OLED_6X8);
-				OLED_ShowNum(62, 40, PatientData_Receive.Drops_per_minute, 3, OLED_6X8);
-				
-				//显示报警状态
-				if(PatientData_Receive.Drops_per_minute > ALARM_HIGH) 
-				{
-					OLED_Printf(0, 50, OLED_6X8, "ALARM: HIGH");
-				} 
-				else if(PatientData_Receive.Drops_per_minute < ALARM_LOW) 
-				{
-					OLED_Printf(0, 50, OLED_6X8, "           ");
-					OLED_Printf(0, 50, OLED_6X8, "ALARM: LOW");
-				}
-            }
+		}
+
+		//定期更新显示（即使没有新数据）
+        if((xTaskGetTickCount() - last_update_time) >= UPDATE_INTERVAL) 
+        {
             OLED_Update();
             last_update_time = xTaskGetTickCount();
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(10));
 	}
 }
 
@@ -329,20 +370,16 @@ void BEEP_TASK(void *pvParameters)
  */
 void MONITOR_TASK(void *pvParameters)
 {
-	PatientData_t patient_data;
     uint8_t alarm_count = 0;
+	uint8_t alarm_type;
     const uint8_t ALARM_THRESHOLD = 3;  // 连续3次报警才触发
-    
+	
     while(1)
     {
-        if(xQueueReceive(Patient_data_queue, &patient_data, portMAX_DELAY) == pdTRUE)
+        if(xQueueReceive(Alarm_type_queue, &alarm_type, portMAX_DELAY) == pdTRUE)
         {
-            // 更新全局变量供显示使用
-            g_Bed_Num = patient_data.Bed_Num;
-            g_Drops_per_minute = patient_data.Drops_per_minute;
-            
             // 报警逻辑处理
-            switch(patient_data.Alarm_type) 
+            switch(alarm_type) 
 			{
                 case 1:
                     alarm_count++;
@@ -368,14 +405,13 @@ void MONITOR_TASK(void *pvParameters)
             }
             
             // 如果连续报警，可以考虑记录日志
-            if(alarm_count >= ALARM_THRESHOLD && patient_data.Alarm_type != 0) 
-			{
-                // 可以在这里添加日志记录功能
-            }
+            // if(alarm_count >= ALARM_THRESHOLD && patient_data.Alarm_type != 0) 
+			// {
+            //     // 可以在这里添加日志记录功能
+            // }
         }
     }
 }
-
 
 /*
  * @brief  串口任务, 在PC端上输入患者的信息
@@ -394,7 +430,6 @@ void SERIAL_TASK(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
-
 
 /*
  * @brief  串口接收消息中断, 用于接收PC端通过串口发送病人的信息
