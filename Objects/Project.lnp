@@ -34,6 +34,7 @@
 ".\objects\beep.o"
 ".\objects\tim.o"
 ".\objects\serial.o"
+".\objects\w25q64.o"
 ".\objects\main.o"
 ".\objects\stm32f10x_it.o"
 ".\objects\my_freertos.o"
