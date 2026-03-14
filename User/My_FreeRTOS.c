@@ -104,10 +104,10 @@ typedef struct
 QueueSetHandle_t queueSet_handle;
 
 //创建队列的句柄
-QueueHandle_t Patient_data_queue;		//NFR24L01发送的数据
-QueueHandle_t Rx_patientdata_queue;		//串口发送的数据
-QueueHandle_t Beep_control_queue;		//用于给蜂鸣器任务发出信号
-QueueHandle_t Alarm_type_queue;			//用于给监控任务发出信号
+QueueHandle_t NRF24L01_Patient_data_queue;	//NFR24L01发送的数据
+QueueHandle_t SERIAL_Patient_data_queue;	//串口发送的数据
+QueueHandle_t Beep_control_queue;			//用于给蜂鸣器任务发出信号
+QueueHandle_t Alarm_type_queue;				//用于给监控任务发出信号
 
 void freertos_demo(void)
 {
@@ -121,23 +121,23 @@ void freertos_demo(void)
 	}
 
     //创建队列
-	Patient_data_queue   = xQueueCreate(5, sizeof(PatientData_t));
-	Rx_patientdata_queue = xQueueCreate(5, sizeof(PatientData_t));
-	Beep_control_queue   = xQueueCreate(1, sizeof(uint8_t));
-	Alarm_type_queue     = xQueueCreate(1, sizeof(uint8_t));
+	NRF24L01_Patient_data_queue = xQueueCreate(5, sizeof(PatientData_t));
+	SERIAL_Patient_data_queue = xQueueCreate(5, sizeof(PatientData_t));
+	Beep_control_queue = xQueueCreate(1, sizeof(uint8_t));
+	Alarm_type_queue  = xQueueCreate(1, sizeof(uint8_t));
 
-	if( Patient_data_queue   == NULL || 
-		Rx_patientdata_queue == NULL ||
-		Beep_control_queue   == NULL ||
-		Alarm_type_queue     == NULL)
+	if( NRF24L01_Patient_data_queue == NULL || 
+		SERIAL_Patient_data_queue == NULL ||
+		Beep_control_queue == NULL ||
+		Alarm_type_queue == NULL)
 	{
         OLED_Clear();
 		OLED_Printf(0, 0, OLED_8X16, "Create queue error!");
 	}
 
 	//把两个队列添加入队列集里
-	xQueueAddToSet(Patient_data_queue, queueSet_handle);
-	xQueueAddToSet(Rx_patientdata_queue, queueSet_handle);
+	xQueueAddToSet(NRF24L01_Patient_data_queue, queueSet_handle);
+	xQueueAddToSet(SERIAL_Patient_data_queue, queueSet_handle);
 
     xTaskCreate((TaskFunction_t)    start_task,
                 (char*)             "start_task",
@@ -238,15 +238,15 @@ void NRF24L01_TASK(void *pvParameters)
 			xQueueSend(Alarm_type_queue, &alarm_type, 0);
 
 			//将结构体patient_data里的数据写到名字为Patient_data_queue的队列里, 并等待时长为:portMAX_DELAY
-			if(xQueueSend(Patient_data_queue, &patient_data, portMAX_DELAY) != pdTRUE)
+			if(xQueueSend(NRF24L01_Patient_data_queue, &patient_data, portMAX_DELAY) != pdTRUE)
 			{
 				//创建一个大小为PatientData_t的临时结构体, 当队列满的时候丢弃旧的数据
 				PatientData_t temp;
 				OLED_Printf(0, 17, OLED_8X16, "Send data error!");
 				
 				//将旧的数据放进临时的结构体里, 重新发送新的数据
-                xQueueReceive(Patient_data_queue, &temp, 0);
-                xQueueSend(Patient_data_queue, &patient_data, 0);
+                xQueueReceive(NRF24L01_Patient_data_queue, &temp, 0);
+                xQueueSend(NRF24L01_Patient_data_queue, &patient_data, 0);
 			}
 			
 			//如果收到按键，发送蜂鸣器控制信号
@@ -269,8 +269,8 @@ void NRF24L01_TASK(void *pvParameters)
 void OLED_TASK(void *pvParameters)
 {
     uint32_t last_update_time = 0;
-	PatientData_t PatientData_Receive;
-	PatientData_t Rx_patientdata_Receive;
+	PatientData_t NRF24L01_Patient_data_Receive;
+	PatientData_t SERIAL_patient_data_Receive;
     const TickType_t UPDATE_INTERVAL = pdMS_TO_TICKS(100);
 	
 	//在队列集中选中对应的队列的句柄
@@ -285,23 +285,22 @@ void OLED_TASK(void *pvParameters)
     while(1)
     {    
 		//从队列集中获取有效信息
-		member_handle = xQueueSelectFromSet(queueSet_handle, pdMS_TO_TICKS(100));
+		// member_handle = xQueueSelectFromSet(queueSet_handle, pdMS_TO_TICKS(100));
 
-		//如果是返回的句柄是来自NRF24L01的数据, 就执行以下操作
-		if(member_handle == Patient_data_queue)
-		{
-			if(xQueueReceive(Patient_data_queue, &PatientData_Receive, 0) == pdTRUE)
+		// //如果是返回的句柄是来自NRF24L01的数据, 就执行以下操作
+		// if(member_handle == NRF24L01_Patient_data_queue)
+		// {
+			if(xQueueReceive(NRF24L01_Patient_data_queue, &NRF24L01_Patient_data_Receive, 0) == pdTRUE)
 			{
-				// OLED_ShowNum(62, 30, PatientData_Receive.Bed_Num, 1, OLED_6X8);
-				OLED_ShowNum(62, 40, PatientData_Receive.Drops_per_minute, 3, OLED_6X8);
+				OLED_ShowNum(62, 40, NRF24L01_Patient_data_Receive.Drops_per_minute, 3, OLED_6X8);
 				
 				//显示报警状态
-				if(PatientData_Receive.Drops_per_minute > ALARM_HIGH) 
+				if(NRF24L01_Patient_data_Receive.Drops_per_minute > ALARM_HIGH) 
 				{
 					OLED_Printf(0, 50, OLED_6X8, "                ");
 					OLED_Printf(0, 50, OLED_6X8, "ALARM: HIGH");
 				} 
-				else if(PatientData_Receive.Drops_per_minute < ALARM_LOW) 
+				else if(NRF24L01_Patient_data_Receive.Drops_per_minute < ALARM_LOW) 
 				{
 					OLED_Printf(0, 50, OLED_6X8, "                ");
 					OLED_Printf(0, 50, OLED_6X8, "ALARM: LOW");
@@ -312,21 +311,21 @@ void OLED_TASK(void *pvParameters)
 					OLED_Printf(0, 50, OLED_6X8, "Normal speed");
 				}
 			}
-        }
-		//如果是返回的句柄是来自串口的数据, 就执行以下操作
-		else if(member_handle == Rx_patientdata_queue)
-		{
-			if(xQueueReceive(Rx_patientdata_queue, &Rx_patientdata_Receive, 0) == pdTRUE)
-			{
-				OLED_Printf(62, 0,  OLED_6X8, "           ");
-				OLED_Printf(62, 10, OLED_6X8, "           ");
-				OLED_Printf(62, 20, OLED_6X8, "           ");
-				OLED_ShowString(62, 0, Rx_patientdata_Receive.Name, OLED_6X8);
-				OLED_ShowNum(62, 10, Rx_patientdata_Receive.Age, 2, OLED_6X8);
-				OLED_ShowString(62, 20, Rx_patientdata_Receive.Sex, OLED_6X8);
-				OLED_ShowNum(62, 30, Rx_patientdata_Receive.Bed_Num, 2, OLED_6X8);
-			}
-		}
+        // }
+		// //如果是返回的句柄是来自串口的数据, 就执行以下操作
+		// else if(member_handle == SERIAL_Patient_data_queue)
+		// {
+		// 	if(xQueueReceive(SERIAL_Patient_data_queue, &SERIAL_patientdata_Receive, 0) == pdTRUE)
+		// 	{
+		// 		OLED_Printf(62, 0,  OLED_6X8, "           ");
+		// 		OLED_Printf(62, 10, OLED_6X8, "           ");
+		// 		OLED_Printf(62, 20, OLED_6X8, "           ");
+		// 		OLED_ShowString(62, 0, SERIAL_patientdata_Receive.Name, OLED_6X8);
+		// 		OLED_ShowNum(62, 10, SERIAL_patientdata_Receive.Age, 2, OLED_6X8);
+		// 		OLED_ShowString(62, 20, SERIAL_patientdata_Receive.Sex, OLED_6X8);
+		// 		OLED_ShowNum(62, 30, SERIAL_patientdata_Receive.Bed_Num, 2, OLED_6X8);
+		// 	}
+		// }
 
 		//定期更新显示（即使没有新数据）
         if((xTaskGetTickCount() - last_update_time) >= UPDATE_INTERVAL) 
@@ -435,7 +434,7 @@ void MONITOR_TASK(void *pvParameters)
  */
 void SERIAL_TASK(void *pvParameters)
 {
-    PatientData_t Rx_patientdata;
+    PatientData_t SERIAL_patientdata;
 	PatientData_t temp;		//临时的结构体, 用于队列满的时候丢弃旧的数据
 
 	while(1)
@@ -443,17 +442,17 @@ void SERIAL_TASK(void *pvParameters)
         if(Serial_RxFlag == 1)
         {
 			//将串口收到的数据赋值给Rx_patientdata结构体里的成员
-			strcpy(Rx_patientdata.Name, Serial_RxPacket_Name);
-			Rx_patientdata.Age  = Serial_RxPacket_Age[0];
-			strcpy(Rx_patientdata.Sex, Serial_RxPacket_Sex);
-			Rx_patientdata.Bed_Num  = Serial_RxPacket_Bed[0];
+			strcpy(SERIAL_patientdata.Name, Serial_RxPacket_Name);
+			SERIAL_patientdata.Age  = Serial_RxPacket_Age[0];
+			strcpy(SERIAL_patientdata.Sex, Serial_RxPacket_Sex);
+			SERIAL_patientdata.Bed_Num  = Serial_RxPacket_Bed[0];
 
 			//如果没有发送成功的话就重新发送
-			if(xQueueSend(Rx_patientdata_queue, &Rx_patientdata, portMAX_DELAY) != pdTRUE)
+			if(xQueueSend(SERIAL_Patient_data_queue, &SERIAL_patientdata, portMAX_DELAY) != pdTRUE)
 			{				
 				//将旧的数据放进临时的结构体里, 重新发送新的数据
-                xQueueReceive(Rx_patientdata_queue, &temp, 0);
-                xQueueSend(Rx_patientdata_queue, &Rx_patientdata, 0);
+                xQueueReceive(SERIAL_Patient_data_queue, &temp, 0);
+                xQueueSend(SERIAL_Patient_data_queue, &SERIAL_patientdata, 0);
 			}
 			Serial_RxFlag = 0;
 		}
@@ -468,15 +467,46 @@ void SERIAL_TASK(void *pvParameters)
  */
 void W25Q64_TASK(void *pvParameters)
 {
+	uint8_t bed_num;
 	uint8_t MID; 
 	uint16_t DID;
+	PatientData_t W25Q64_Patient_data_Receive;
+	PatientData_t patient_cache[10] = {0};  // 假设最多10个病床
 
-	W25Q64_ReadID(&MID, &DID);
-	OLED_ShowHexNum(76, 0, MID, 2, OLED_6X8);
-	OLED_ShowHexNum(76, 10, DID, 2, OLED_6X8);
+	//在队列集中选中对应的队列的句柄
+	QueueSetMemberHandle_t member_handle; 
+
 	while(1)
 	{
-		
+		member_handle = xQueueSelectFromSet(queueSet_handle, pdMS_TO_TICKS(100));
+
+		//如果是返回的句柄是来自NRF24L01的数据, 就执行以下操作
+		if(member_handle == NRF24L01_Patient_data_queue)
+		{
+			if(xQueueReceive(NRF24L01_Patient_data_queue, &W25Q64_Patient_data_Receive, 0) == pdTRUE)
+			{
+				bed_num = 1;  
+				
+				// 合并：保留缓存里的静态信息，更新动态信息
+				patient_cache[bed_num].Drops_per_minute = W25Q64_Patient_data_Receive.Drops_per_minute;
+				patient_cache[bed_num].Key_Num = W25Q64_Patient_data_Receive.Key_Num;
+				patient_cache[bed_num].Alarm_type = W25Q64_Patient_data_Receive.Alarm_type;
+			}
+        }
+		//如果是返回的句柄是来自串口的数据, 就执行以下操作
+		else if(member_handle == SERIAL_Patient_data_queue)
+		{
+			if(xQueueReceive(SERIAL_Patient_data_queue, &W25Q64_Patient_data_Receive, 0) == pdTRUE)
+			{
+				bed_num = W25Q64_Patient_data_Receive.Bed_Num;
+				
+				// 合并：保留缓存里的动态信息，更新静态信息
+				strcpy(patient_cache[bed_num].Name, W25Q64_Patient_data_Receive.Name);
+				patient_cache[bed_num].Age = W25Q64_Patient_data_Receive.Age;
+				strcpy(patient_cache[bed_num].Sex, W25Q64_Patient_data_Receive.Sex);
+				patient_cache[bed_num].Bed_Num = bed_num;
+			}
+		}
         vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
