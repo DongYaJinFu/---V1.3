@@ -348,6 +348,9 @@ void OLED_TASK(void *pvParameters)
    			W25Q64_patient_data_Receive.Name[0] != 0xFF &&  // 排除未初始化的Flash
 			W25Q64_patient_data_Receive.Age != 0xFF)  
 		{
+			OLED_Printf(62, 0,  OLED_6X8, "                ");
+			OLED_Printf(62, 10, OLED_6X8, "                ");
+			OLED_Printf(62, 20, OLED_6X8, "                ");
 			OLED_ShowString(62, 0, W25Q64_patient_data_Receive.Name, OLED_6X8);
 			OLED_ShowNum(62, 10, W25Q64_patient_data_Receive.Age, 5, OLED_6X8);
 			OLED_ShowString(62, 20, W25Q64_patient_data_Receive.Sex, OLED_6X8);
@@ -358,6 +361,7 @@ void OLED_TASK(void *pvParameters)
 			OLED_ShowString(62, 0, "Empty", OLED_6X8);
 			OLED_Printf(62, 10, OLED_6X8, "           ");
 			OLED_Printf(62, 20, OLED_6X8, "           ");
+			OLED_ShowNum(62, 30, current_bed, 5, OLED_6X8);
 		}
 
 		//定期更新显示（即使没有新数据）

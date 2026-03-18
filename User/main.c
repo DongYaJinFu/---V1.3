@@ -1,7 +1,7 @@
 #include "stm32f10x.h"                  // Device header
 #include "Delay.h"
 
-#if 0
+#if 1
 //外设的头文件
 #include "LED.h"
 #include "key.h"
