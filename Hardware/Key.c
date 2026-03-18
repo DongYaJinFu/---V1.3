@@ -1,5 +1,7 @@
 #include "stm32f10x.h"                  // Device header
 #include "Delay.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 void Key_Init(void)
 {
@@ -17,16 +19,16 @@ uint8_t Key_GetNum(void)
 	uint8_t KeyNum = 0;
 	if (GPIO_ReadInputDataBit(GPIOE, GPIO_Pin_3) == 0)
 	{
-		Delay_ms(20);
+		vTaskDelay(20);
 		while (GPIO_ReadInputDataBit(GPIOE, GPIO_Pin_3) == 0);
-		Delay_ms(20);
+		vTaskDelay(20);
 		KeyNum = 1;
 	}
 	if (GPIO_ReadInputDataBit(GPIOE, GPIO_Pin_4) == 0)
 	{
-		Delay_ms(20);
+		vTaskDelay(20);
 		while (GPIO_ReadInputDataBit(GPIOE, GPIO_Pin_4) == 0);
-		Delay_ms(20);
+		vTaskDelay(20);
 		KeyNum = 2;
 	}
 	

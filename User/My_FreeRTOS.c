@@ -276,7 +276,7 @@ void OLED_TASK(void *pvParameters)
 {
 	uint8_t current_bed = 1; 
 	uint32_t addr;
-	uint32_t last_key = 0;
+	uint8_t key;
     uint32_t last_update_time = 0;
 	PatientData_t NRF24L01_Patient_data_Receive;
 	PatientData_t W25Q64_patient_data_Receive;
@@ -290,7 +290,7 @@ void OLED_TASK(void *pvParameters)
 
     while(1)
     {    
-		uint8_t key = Key_GetNum();
+		key = Key_GetNum();
 		if(xQueueReceive(NRF24L01_Patient_data_queue, &NRF24L01_Patient_data_Receive, 0) == pdTRUE)
 		{
 			OLED_ShowNum(62, 40, NRF24L01_Patient_data_Receive.Drops_per_minute, 3, OLED_6X8);
@@ -312,23 +312,32 @@ void OLED_TASK(void *pvParameters)
 				OLED_Printf(0, 50, OLED_6X8, "Normal speed");
 			}
 		}
-		if(key != 0 && key != last_key)
-        {
-			if(key == 1)  //假设按键1用于切换病床
+
+		if(key == 1)  //假设按键1用于切换病床
+		{
+			current_bed++;
+			if(current_bed > 10) 
 			{
-				current_bed++;
-				if(current_bed > 10) 
-				{
-					current_bed = 1;  //循环：1-10号床
-				}
-				// 清除旧数据显示区域
-				OLED_Printf(62, 0,  OLED_6X8, "           ");
-				OLED_Printf(62, 10, OLED_6X8, "           ");
-				OLED_Printf(62, 20, OLED_6X8, "           ");
-				OLED_Printf(62, 30, OLED_6X8, "           ");
+				current_bed = 1;  //循环：1-10号床
 			}
+			// 清除旧数据显示区域
+			OLED_Printf(62, 0,  OLED_6X8, "           ");
+			OLED_Printf(62, 10, OLED_6X8, "           ");
+			OLED_Printf(62, 20, OLED_6X8, "           ");
+			OLED_ShowNum(62, 30, current_bed, 5, OLED_6X8);
 		}
-		last_key = key;
+		else if(key == 2)
+		{
+			current_bed--;
+			if(current_bed <= 0) 
+			{
+				current_bed = 9;  //循环：1-10号床
+			}
+			OLED_Printf(62, 0,  OLED_6X8, "           ");
+			OLED_Printf(62, 10, OLED_6X8, "           ");
+			OLED_Printf(62, 20, OLED_6X8, "           ");
+			OLED_ShowNum(62, 30, current_bed, 5, OLED_6X8);
+		}
 
 		//地址偏移并且读出W25Q64里的数据
 		addr = (current_bed - 1) * 4096;
@@ -349,7 +358,6 @@ void OLED_TASK(void *pvParameters)
 			OLED_ShowString(62, 0, "Empty", OLED_6X8);
 			OLED_Printf(62, 10, OLED_6X8, "           ");
 			OLED_Printf(62, 20, OLED_6X8, "           ");
-			OLED_Printf(62, 30, OLED_6X8, "           ");
 		}
 
 		//定期更新显示（即使没有新数据）
@@ -369,33 +377,30 @@ void OLED_TASK(void *pvParameters)
  */
 void BEEP_TASK(void *pvParameters)
 {
+	uint8_t beep_cmd;
+	const TickType_t BEEP_INTERVAL = pdMS_TO_TICKS(200);  // 蜂鸣间隔
+	const TickType_t BEEP_DURATION = pdMS_TO_TICKS(5000); // 总持续5秒
+	
 	while(1)
 	{
-		uint8_t beep_cmd;
-		const TickType_t BEEP_INTERVAL = pdMS_TO_TICKS(200);  // 蜂鸣间隔
-		const TickType_t BEEP_DURATION = pdMS_TO_TICKS(5000); // 总持续5秒
-		
-		while(1)
+		if(xQueueReceive(Beep_control_queue, &beep_cmd, pdMS_TO_TICKS(100)) == pdTRUE)
 		{
-			if(xQueueReceive(Beep_control_queue, &beep_cmd, pdMS_TO_TICKS(100)) == pdTRUE)
+			if(beep_cmd == 1) 
 			{
-				if(beep_cmd == 1) 
+				TickType_t start_time = xTaskGetTickCount();
+				
+				while((xTaskGetTickCount() - start_time) < BEEP_DURATION) 
 				{
-					TickType_t start_time = xTaskGetTickCount();
-					
-					while((xTaskGetTickCount() - start_time) < BEEP_DURATION) 
+					// 检查是否有新的停止命令
+					if(xQueueReceive(Beep_control_queue, &beep_cmd, 0) == pdTRUE) 
 					{
-						// 检查是否有新的停止命令
-						if(xQueueReceive(Beep_control_queue, &beep_cmd, 0) == pdTRUE) 
-						{
-							if(beep_cmd == 0) break;
-						}
-						
-						Beep_On();
-						vTaskDelay(BEEP_INTERVAL);
-						Beep_Off();
-						vTaskDelay(BEEP_INTERVAL);
+						if(beep_cmd == 0) break;
 					}
+					
+					Beep_On();
+					vTaskDelay(BEEP_INTERVAL);
+					Beep_Off();
+					vTaskDelay(BEEP_INTERVAL);
 				}
 			}
 		}
@@ -653,7 +658,7 @@ void USART1_IRQHandler(void)
 
 						case 1:
 							Serial_RxPacket_Age[0] = age_temp;
-							Serial_RxPacket_Age[pRxPacket] = '\0';
+							// Serial_RxPacket_Age[pRxPacket] = '\0';
 							age_temp = 0; 
 						break;
 
@@ -663,7 +668,7 @@ void USART1_IRQHandler(void)
 
 						case 3:
 							Serial_RxPacket_Bed[0] = age_temp;
-							Serial_RxPacket_Bed[pRxPacket] = '\0';
+							// Serial_RxPacket_Bed[pRxPacket] = '\0';
 							age_temp = 0; 
 						break;
 					}
