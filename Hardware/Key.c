@@ -32,3 +32,4 @@ uint8_t Key_GetNum(void)
 	
 	return KeyNum;
 }
+

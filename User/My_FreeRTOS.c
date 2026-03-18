@@ -19,7 +19,7 @@
 #define ALARM_LOW  20      	    //滴速过低报警
 #define ALARM_HIGH 120     	    //滴速过高报警
 
-uint8_t  Key_Num;		        //按键
+uint8_t Key_Num = 0;
 uint8_t  Beep_Active = 0;      // 蜂鸣器是否在工作
 uint16_t Beep_TimeCount = 0;   // 计时
 uint8_t  Beep_State = 0;       // 当前开关状态
@@ -100,7 +100,7 @@ typedef struct
     char    Sex[8];    		   //性别
    	uint8_t Bed_Num;		   //病床号
 	uint8_t Drops_per_minute;  //滴速(每分钟多少滴)
-	uint8_t Key_Num;		   //按键
+	uint8_t NRF24L01_Key_Num;		   //按键
 	uint8_t Alarm_type;		   //滴速警告类型, 0:正常, 1:过低, 2:过高
 } PatientData_t;
 
@@ -224,7 +224,7 @@ void NRF24L01_TASK(void *pvParameters)
 		if(NRF24L01_Receive() == 1)		
 		{
 			patient_data.Drops_per_minute = NRF24L01_RxPacket[0]; //滴速
-			patient_data.Key_Num = 			NRF24L01_RxPacket[1]; //按键检测
+			patient_data.NRF24L01_Key_Num = NRF24L01_RxPacket[1]; //按键检测
 			
 			//滴速阈值判定
 			if(patient_data.Drops_per_minute > ALARM_HIGH) 
@@ -256,7 +256,7 @@ void NRF24L01_TASK(void *pvParameters)
 			}
 			
 			//如果收到按键，发送蜂鸣器控制信号
-            if(patient_data.Key_Num == 1) 
+            if(patient_data.NRF24L01_Key_Num == 1) 
 			{
                 uint8_t beep_cmd = 1;
                 xQueueSend(Beep_control_queue, &beep_cmd, 0);
@@ -274,69 +274,83 @@ void NRF24L01_TASK(void *pvParameters)
  */
 void OLED_TASK(void *pvParameters)
 {
+	uint8_t current_bed = 1; 
 	uint32_t addr;
-	uint8_t read_bed = 1;  	//想读几号床
-	uint32_t read_addr;
+	uint32_t last_key = 0;
     uint32_t last_update_time = 0;
 	PatientData_t NRF24L01_Patient_data_Receive;
-	PatientData_t SERIAL_patient_data_Receive;
 	PatientData_t W25Q64_patient_data_Receive;
     const TickType_t UPDATE_INTERVAL = pdMS_TO_TICKS(100);
 	
-	//在队列集中选中对应的队列的句柄
-	QueueSetMemberHandle_t member_handle; 
-    
 	OLED_Printf(0, 0, OLED_6X8, "Name:");
 	OLED_Printf(0, 10, OLED_6X8, "Age:");
 	OLED_Printf(0, 20, OLED_6X8, "Sex:");
 	OLED_Printf(0, 30, OLED_6X8, "Bed num:");
 	OLED_Printf(0, 40, OLED_6X8, "Drip Rate:");
 
-	read_addr = (read_bed - 1) * sizeof(PatientData_t);
-
     while(1)
     {    
-		member_handle = xQueueSelectFromSet(queueSet_handle, pdMS_TO_TICKS(100));
-
-		if(member_handle == NRF24L01_Patient_data_queue)
+		uint8_t key = Key_GetNum();
+		if(xQueueReceive(NRF24L01_Patient_data_queue, &NRF24L01_Patient_data_Receive, 0) == pdTRUE)
 		{
-			if(xQueueReceive(NRF24L01_Patient_data_queue, &NRF24L01_Patient_data_Receive, 0) == pdTRUE)
-			{
-				OLED_ShowNum(62, 40, NRF24L01_Patient_data_Receive.Drops_per_minute, 3, OLED_6X8);
+			OLED_ShowNum(62, 40, NRF24L01_Patient_data_Receive.Drops_per_minute, 3, OLED_6X8);
 
-				//显示报警状态
-				if(NRF24L01_Patient_data_Receive.Drops_per_minute > ALARM_HIGH) 
-				{
-					OLED_Printf(0, 50, OLED_6X8, "                ");
-					OLED_Printf(0, 50, OLED_6X8, "ALARM: HIGH");
-				} 
-				else if(NRF24L01_Patient_data_Receive.Drops_per_minute < ALARM_LOW) 
-				{
-					OLED_Printf(0, 50, OLED_6X8, "                ");
-					OLED_Printf(0, 50, OLED_6X8, "ALARM: LOW");
-				}
-				else
-				{
-					OLED_Printf(0, 50, OLED_6X8, "                ");
-					OLED_Printf(0, 50, OLED_6X8, "Normal speed");
-				}
+			//显示报警状态
+			if(NRF24L01_Patient_data_Receive.Drops_per_minute > ALARM_HIGH) 
+			{
+				OLED_Printf(0, 50, OLED_6X8, "                ");
+				OLED_Printf(0, 50, OLED_6X8, "ALARM: HIGH");
+			} 
+			else if(NRF24L01_Patient_data_Receive.Drops_per_minute < ALARM_LOW) 
+			{
+				OLED_Printf(0, 50, OLED_6X8, "                ");
+				OLED_Printf(0, 50, OLED_6X8, "ALARM: LOW");
+			}
+			else
+			{
+				OLED_Printf(0, 50, OLED_6X8, "                ");
+				OLED_Printf(0, 50, OLED_6X8, "Normal speed");
 			}
 		}
-		//如果是返回的句柄是来自串口的数据, 就执行以下操作
-		else if(member_handle == SERIAL_Patient_data_queue)
-		{
-			if(xQueueReceive(SERIAL_Patient_data_queue, &SERIAL_patient_data_Receive, 0) == pdTRUE)
+		if(key != 0 && key != last_key)
+        {
+			if(key == 1)  //假设按键1用于切换病床
 			{
+				current_bed++;
+				if(current_bed > 10) 
+				{
+					current_bed = 1;  //循环：1-10号床
+				}
+				// 清除旧数据显示区域
 				OLED_Printf(62, 0,  OLED_6X8, "           ");
 				OLED_Printf(62, 10, OLED_6X8, "           ");
 				OLED_Printf(62, 20, OLED_6X8, "           ");
-				OLED_ShowString(62, 0, SERIAL_patient_data_Receive.Name, OLED_6X8);
-				OLED_ShowNum(62, 10, SERIAL_patient_data_Receive.Age, 2, OLED_6X8);
-				OLED_ShowString(62, 20, SERIAL_patient_data_Receive.Sex, OLED_6X8);
-				OLED_ShowNum(62, 30, SERIAL_patient_data_Receive.Bed_Num, 2, OLED_6X8);
+				OLED_Printf(62, 30, OLED_6X8, "           ");
 			}
 		}
+		last_key = key;
+
+		//地址偏移并且读出W25Q64里的数据
+		addr = (current_bed - 1) * 4096;
 		W25Q64_ReadData(addr, (uint8_t*) &W25Q64_patient_data_Receive, sizeof(PatientData_t));
+		
+		//名字不为空，说明有数据
+		if(W25Q64_patient_data_Receive.Name[0] != '\0'  && 
+   			W25Q64_patient_data_Receive.Name[0] != 0xFF &&  // 排除未初始化的Flash
+			W25Q64_patient_data_Receive.Age != 0xFF)  
+		{
+			OLED_ShowString(62, 0, W25Q64_patient_data_Receive.Name, OLED_6X8);
+			OLED_ShowNum(62, 10, W25Q64_patient_data_Receive.Age, 5, OLED_6X8);
+			OLED_ShowString(62, 20, W25Q64_patient_data_Receive.Sex, OLED_6X8);
+			OLED_ShowNum(62, 30, W25Q64_patient_data_Receive.Bed_Num, 5, OLED_6X8);
+		}
+		else
+		{
+			OLED_ShowString(62, 0, "Empty", OLED_6X8);
+			OLED_Printf(62, 10, OLED_6X8, "           ");
+			OLED_Printf(62, 20, OLED_6X8, "           ");
+			OLED_Printf(62, 30, OLED_6X8, "           ");
+		}
 
 		//定期更新显示（即使没有新数据）
         if((xTaskGetTickCount() - last_update_time) >= UPDATE_INTERVAL) 
@@ -447,37 +461,30 @@ void SERIAL_TASK(void *pvParameters)
 {
 	uint8_t bed_num;
 	uint32_t addr;
-    // PatientData_t SERIAL_patientdata;
-	PatientData_t temp;		//临时的结构体, 用于队列满的时候丢弃旧的数据
-	PatientData_t patient_cache[10] = {0};  // 假设最多10个病床
+	uint8_t index;
+	static PatientData_t patient_cache[10] = {0};  // 假设最多10个病床
 
 	while(1)
 	{
         if(Serial_RxFlag == 1)
         {
 			bed_num = Serial_RxPacket_Bed[0];
-			//将串口收到的数据赋值给Rx_patientdata结构体里的成员
-			// strcpy(SERIAL_patientdata.Name, Serial_RxPacket_Name);
-			// SERIAL_patientdata.Age  = Serial_RxPacket_Age[0];
-			// strcpy(SERIAL_patientdata.Sex, Serial_RxPacket_Sex);
-			// SERIAL_patientdata.Bed_Num  = Serial_RxPacket_Bed[0];
+			index = bed_num - 1;
 
-			strcpy(patient_cache[bed_num].Name, Serial_RxPacket_Name);
-			patient_cache[bed_num].Age = Serial_RxPacket_Age[0];
-			strcpy(patient_cache[bed_num].Sex, Serial_RxPacket_Sex);
-			patient_cache[bed_num].Bed_Num = bed_num;
+			if(bed_num >= 1 && bed_num <= 10)
+            {
+				memset(&patient_cache[index], 0, sizeof(PatientData_t));
 
-			// 计算地址：床号1存0，床号2存32...
-			addr = (bed_num - 1) * sizeof(PatientData_t);
-			W25Q64_SectorErase(addr);  // 擦除扇区
-			W25Q64_PageProgram(addr, (uint8_t*) &patient_cache[bed_num], sizeof(PatientData_t));
+				strcpy(patient_cache[index].Name, Serial_RxPacket_Name);
+				patient_cache[index].Age = Serial_RxPacket_Age[0];
+				strcpy(patient_cache[index].Sex, Serial_RxPacket_Sex);
+				patient_cache[index].Bed_Num = bed_num;
 
-			//如果没有发送成功的话就重新发送
-			if(xQueueSend(SERIAL_Patient_data_queue, &patient_cache[bed_num], portMAX_DELAY) != pdTRUE)
-			{				
-				//将旧的数据放进临时的结构体里, 重新发送新的数据
-                xQueueReceive(SERIAL_Patient_data_queue, &temp, 0);
-                xQueueSend(SERIAL_Patient_data_queue, &patient_cache[bed_num], 0);
+				// 计算地址：床号1存0，床号2存32...
+				addr = (bed_num - 1) * 4096;
+				W25Q64_SectorErase(addr);  // 擦除扇区
+				vTaskDelay(pdMS_TO_TICKS(10));
+				W25Q64_PageProgram(addr, (uint8_t*) &patient_cache[index], sizeof(PatientData_t));
 			}
 			Serial_RxFlag = 0;
 		}

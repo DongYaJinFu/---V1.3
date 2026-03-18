@@ -25,6 +25,11 @@ void W25Q64_W_MOSI(uint8_t BitValue)
 	GPIO_WriteBit(GPIOF, GPIO_Pin_13, (BitAction)BitValue);
 }
 
+void W25Q64_Init(void)
+{
+	
+}
+
 void W25Q64_GPIO_Init(void)
 {
 	/*开启GPIO时钟*/
