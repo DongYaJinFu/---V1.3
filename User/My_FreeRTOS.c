@@ -15,6 +15,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+#include "semphr.h"
 
 #define ALARM_LOW  20      	    	//滴速过低报警
 #define ALARM_HIGH 120     	    	//滴速过高报警
@@ -108,6 +109,9 @@ typedef struct
 //创建队列集的句柄
 QueueSetHandle_t queueSet_handle;
 
+//创建互斥信号量
+SemaphoreHandle_t semphr_handle;
+
 //创建队列的句柄
 QueueHandle_t NRF24L01_Patient_data_queue;	//NFR24L01发送的数据
 QueueHandle_t SERIAL_Patient_data_queue;	//串口发送的数据
@@ -123,6 +127,15 @@ void freertos_demo(void)
 	{
 		OLED_Clear();
 		OLED_Printf(0, 0, OLED_8X16, "Create queueset error!");
+	}
+
+	//创建二值信号量, 并释放一次信号量
+	semphr_handle = xSemaphoreCreateBinary();
+	xSemaphoreGive(semphr_handle);
+	if(semphr_handle == NULL)
+	{
+		OLED_Clear();
+		OLED_Printf(0, 0, OLED_8X16, "Create semaphore error!");
 	}
 
     //创建队列
@@ -458,6 +471,8 @@ void SERIAL_TASK(void *pvParameters)
 	{
         if(Serial_RxFlag == 1)
         {
+			Serial_RxFlag = 0;
+			xSemaphoreTake(semphr_handle, portMAX_DELAY);
 			bed_num = Serial_RxPacket_Bed[0];
 			index = bed_num - 1;
 
@@ -474,10 +489,9 @@ void SERIAL_TASK(void *pvParameters)
 				//计算地址, 先擦除目前地址里的内容, 再写入新的内容
 				addr = (bed_num - 1) * 4096;
 				W25Q64_SectorErase(addr);  // 擦除扇区
-				vTaskDelay(pdMS_TO_TICKS(10));
 				W25Q64_PageProgram(addr, (uint8_t*) &patient_cache[index], sizeof(PatientData_t));
 			}
-			Serial_RxFlag = 0;
+			xSemaphoreGive(semphr_handle);
 		}
         vTaskDelay(pdMS_TO_TICKS(50));
     }
@@ -498,22 +512,30 @@ void KEY_TASK(void *pvParameters)
 	while(1)
 	{
 		key = Key_GetNum();
-		if(key == 1)  //假设按键1用于切换病床
+		switch(key)
 		{
-			current_bed++;
-			if(current_bed > 10) 
-			{
-				current_bed = 1;  //循环：1-10号床
-			}
+			case 1:
+				current_bed++;
+				if(current_bed > 10) 
+				{
+					current_bed = 1;  //循环：1-10号床
+				}
+				break;
+			case 2:
+				current_bed--;
+				if(current_bed < 1) 
+				{
+					current_bed = 9;  //循环：1-10号床
+				}
+				break;
+			case 3:
+				W25Q64_SectorErase(addr);
+				vTaskDelay(pdMS_TO_TICKS(10));
+				break;
+			default:
+			break;
 		}
-		if(key == 2)
-		{
-			current_bed--;
-			if(current_bed <= 0) 
-			{
-				current_bed = 9;  //循环：1-10号床
-			}
-		}
+
 		addr = (current_bed - 1) * 4096;
 		W25Q64_ReadData(addr, (uint8_t*) &W25Q64_patient_data_Receive, sizeof(PatientData_t));	
 
