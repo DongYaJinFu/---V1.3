@@ -570,7 +570,7 @@ void USART1_IRQHandler(void)
         static uint8_t pRxPacket = 0;
         static uint8_t HeaderIndex = 0;      //包头匹配的索引
         static uint8_t CurrentHeader = 0;    //当前匹配的包头类型 0:NAME, 1:AGE, 2:SEX
-		static uint8_t age_temp = 0;
+		static uint8_t temp = 0;
 
 		switch(RxState)
 		{
@@ -626,7 +626,7 @@ void USART1_IRQHandler(void)
                     {
                         RxState = receive_data;
                         pRxPacket = 0;
-						age_temp = 0; 
+						temp = 0; 
                     }
 				}
 				else
@@ -659,7 +659,7 @@ void USART1_IRQHandler(void)
                     {
                         RxState = receive_data;
                         pRxPacket = 0;
-						age_temp = 0; 
+						temp = 0; 
                     }
 				}
 				else
@@ -678,9 +678,9 @@ void USART1_IRQHandler(void)
 						break;
 
 						case 1:
-							Serial_RxPacket_Age[0] = age_temp;
+							Serial_RxPacket_Age[0] = temp;
 							// Serial_RxPacket_Age[pRxPacket] = '\0';
-							age_temp = 0; 
+							temp = 0; 
 						break;
 
 						case 2:
@@ -688,9 +688,9 @@ void USART1_IRQHandler(void)
 							break;
 
 						case 3:
-							Serial_RxPacket_Bed[0] = age_temp;
+							Serial_RxPacket_Bed[0] = temp;
 							// Serial_RxPacket_Bed[pRxPacket] = '\0';
-							age_temp = 0; 
+							temp = 0; 
 						break;
 					}
 				}
@@ -710,7 +710,7 @@ void USART1_IRQHandler(void)
 						case 1:
                             if(RxData >= '0' && RxData <= '9')
                             {
-    						    age_temp = age_temp * 10 + (RxData - '0');
+    						    temp = temp * 10 + (RxData - '0');
 							}
 							pRxPacket++;
 						break;
@@ -727,7 +727,7 @@ void USART1_IRQHandler(void)
 						case 3:
                             if(RxData >= '0' && RxData <= '9')
                             {
-    						    age_temp = age_temp * 10 + (RxData - '0');
+    						    temp = temp * 10 + (RxData - '0');
 							}
 							pRxPacket++;
 						break;
