@@ -56,7 +56,7 @@ TaskHandle_t start_task_handler;
 void start_task(void *pvParameters);
 
 //NRF24L01的任务配置
-#define NRF24L01_TASK_PRIO             2
+#define NRF24L01_TASK_PRIO             1
 #define NRF24L01_TASK_STACK_SIZE       256
 TaskHandle_t NRF24L01_TASK_handler;
 void NRF24L01_TASK(void *pvParameters);
@@ -363,6 +363,7 @@ void OLED_TASK(void *pvParameters)
 			OLED_Update();
 			last_update_time = xTaskGetTickCount();
 		}
+		
 		vTaskDelay(pdMS_TO_TICKS(10));
 	}
 }
