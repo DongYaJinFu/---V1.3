@@ -1,5 +1,4 @@
 #include "stm32f10x.h"                  // Device header
-#include "Delay.h"
 
 #if 1
 //外设的头文件
@@ -10,6 +9,7 @@
 #include "BEEP.h"
 #include "serial.h"
 #include "W25Q64.h"
+#include "TIM.h"
 #endif
 
 //个人操作系统的头文件
@@ -17,6 +17,7 @@
 
 int main(void)
 {
+	Timer_Init();
 	Key_Init();
 	LED_Init();
 	OLED_Init();

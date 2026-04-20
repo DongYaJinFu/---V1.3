@@ -10,6 +10,7 @@
 #include "BEEP.h"
 #include "serial.h"
 #include "W25Q64.h"
+#include "TIM.h"
 
 //FreeRTOS的头文件
 #include "FreeRTOS.h"
@@ -20,7 +21,6 @@
 #define ALARM_LOW  20      	    	//滴速过低报警
 #define ALARM_HIGH 120     	    	//滴速过高报警
 
-uint8_t  Key_Num = 0;				//用于NRF24L01任务与BEEP任务的同步
 uint8_t  current_bed = 1;			//当前床位, 用于按键任务与OLED任务显示床位的同步
 uint8_t  Beep_Active = 0;      		//蜂鸣器是否在工作
 uint16_t Beep_TimeCount = 0;   		//计时
@@ -277,7 +277,7 @@ void NRF24L01_TASK(void *pvParameters)
 			}
 		}
 		//转换成系统节拍数, 避免移植之后系统节拍为100hz, 单写vTaskDelay(50)的话, 实际上是500ms
-		vTaskDelay(pdMS_TO_TICKS(50));
+		vTaskDelay(pdMS_TO_TICKS(10));
 	}
 }
 
@@ -497,7 +497,6 @@ void SERIAL_TASK(void *pvParameters)
     }
 }
 
-#if 1
 /*
  * @brief  按键的任务, 切换病人的信息
  * @param  无
@@ -553,7 +552,6 @@ void KEY_TASK(void *pvParameters)
 		vTaskDelay(pdMS_TO_TICKS(50));
 	}
 }
-#endif
 
 /*
  * @brief  串口接收消息中断, 用于接收PC端通过串口发送病人的信息
@@ -747,13 +745,13 @@ void USART1_IRQHandler(void)
 	}
 }
 
-#if 0
+#if 1
 void TIM2_IRQHandler(void)
 {
     if (TIM_GetITStatus(TIM2, TIM_IT_Update) != RESET)
     {
+		Key_Tick();
         TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
-      
     }
 }
 #endif
