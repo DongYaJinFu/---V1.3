@@ -525,7 +525,7 @@ void KEY_TASK(void *pvParameters)
 				current_bed--;
 				if(current_bed < 1) 
 				{
-					current_bed = 9;  //循环：1-10号床
+					current_bed = 10;  //循环：1-10号床
 				}
 				break;
 			case 3:
