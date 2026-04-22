@@ -56,7 +56,7 @@ TaskHandle_t start_task_handler;
 void start_task(void *pvParameters);
 
 //NRF24L01的任务配置
-#define NRF24L01_TASK_PRIO             2
+#define NRF24L01_TASK_PRIO             1
 #define NRF24L01_TASK_STACK_SIZE       256
 TaskHandle_t NRF24L01_TASK_handler;
 void NRF24L01_TASK(void *pvParameters);
@@ -114,7 +114,7 @@ SemaphoreHandle_t semphr_handle;
 
 //创建队列的句柄
 QueueHandle_t NRF24L01_Patient_data_queue;	//NFR24L01发送的数据
-QueueHandle_t SERIAL_Patient_data_queue;	//串口发送的数据
+QueueHandle_t W25Q64_Patient_data_queue;	//串口发送的数据
 QueueHandle_t Beep_control_queue;			//用于给蜂鸣器任务发出信号
 QueueHandle_t Alarm_type_queue;				//用于给监控任务发出信号
 
@@ -140,12 +140,12 @@ void freertos_demo(void)
 
     //创建队列
 	NRF24L01_Patient_data_queue = xQueueCreate(5, sizeof(PatientData_t));
-	SERIAL_Patient_data_queue = xQueueCreate(5, sizeof(PatientData_t));
+	W25Q64_Patient_data_queue = xQueueCreate(5, sizeof(PatientData_t));
 	Beep_control_queue = xQueueCreate(1, sizeof(uint8_t));
 	Alarm_type_queue  = xQueueCreate(1, sizeof(uint8_t));
 
 	if( NRF24L01_Patient_data_queue == NULL || 
-		SERIAL_Patient_data_queue == NULL ||
+		W25Q64_Patient_data_queue == NULL ||
 		Beep_control_queue == NULL ||
 		Alarm_type_queue == NULL)
 	{
@@ -155,7 +155,7 @@ void freertos_demo(void)
 
 	//把两个队列添加入队列集里
 	xQueueAddToSet(NRF24L01_Patient_data_queue, queueSet_handle);
-	xQueueAddToSet(SERIAL_Patient_data_queue, queueSet_handle);
+	xQueueAddToSet(W25Q64_Patient_data_queue, queueSet_handle);
 
     xTaskCreate((TaskFunction_t)    start_task,
                 (char*)             "start_task",
@@ -331,9 +331,9 @@ void OLED_TASK(void *pvParameters)
 			}
 		}
 
-		else if(member_handle == SERIAL_Patient_data_queue)
+		else if(member_handle == W25Q64_Patient_data_queue)
 		{
-			if(xQueueReceive(SERIAL_Patient_data_queue, &SERIAL_patient_data_Receive, 0) == pdTRUE)
+			if(xQueueReceive(W25Q64_Patient_data_queue, &SERIAL_patient_data_Receive, 0) == pdTRUE)
 			{
 				//名字不为空，说明有数据
 				if(SERIAL_patient_data_Receive.Name[0] != '\0'  && 
@@ -363,6 +363,7 @@ void OLED_TASK(void *pvParameters)
 			OLED_Update();
 			last_update_time = xTaskGetTickCount();
 		}
+		
 		vTaskDelay(pdMS_TO_TICKS(10));
 	}
 }
@@ -524,7 +525,7 @@ void KEY_TASK(void *pvParameters)
 				current_bed--;
 				if(current_bed < 1) 
 				{
-					current_bed = 10;  //循环：1-10号床
+					current_bed = 9;  //循环：1-10号床
 				}
 				break;
 			case 3:
@@ -539,15 +540,15 @@ void KEY_TASK(void *pvParameters)
 		W25Q64_ReadData(addr, (uint8_t*) &W25Q64_patient_data_Receive, sizeof(PatientData_t));	
 
 		//通过队列将W25Q64_patient_data_Receive里的内容发送给OLED显示
-		if(xQueueSend(SERIAL_Patient_data_queue, &W25Q64_patient_data_Receive, portMAX_DELAY) != pdTRUE)
+		if(xQueueSend(W25Q64_Patient_data_queue, &W25Q64_patient_data_Receive, portMAX_DELAY) != pdTRUE)
 		{
 			//创建一个大小为PatientData_t的临时结构体, 当队列满的时候丢弃旧的数据
 			PatientData_t temp;
 			OLED_Printf(0, 17, OLED_8X16, "Send data error!");
 			
 			//将旧的数据放进临时的结构体里, 重新发送新的数据
-			xQueueReceive(SERIAL_Patient_data_queue, &temp, 0);
-			xQueueSend(SERIAL_Patient_data_queue, &W25Q64_patient_data_Receive, 0);
+			xQueueReceive(W25Q64_Patient_data_queue, &temp, 0);
+			xQueueSend(W25Q64_Patient_data_queue, &W25Q64_patient_data_Receive, 0);
 		}
 		vTaskDelay(pdMS_TO_TICKS(50));
 	}
@@ -755,4 +756,3 @@ void TIM2_IRQHandler(void)
     }
 }
 #endif
-
