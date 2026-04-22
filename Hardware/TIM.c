@@ -15,7 +15,7 @@ void Timer_Init(void)
     
     //自动重装载值：计数值达到多少时触发
     //1MHz的频率，计1000次就是1毫秒
-    TIM_TimeBaseStructure.TIM_Period = 10000 - 1;   // 1ms中断一次
+    TIM_TimeBaseStructure.TIM_Period = 1000 - 1;   // 1ms中断一次
     
     TIM_TimeBaseStructure.TIM_ClockDivision = 0;    // 时钟分割，一般用0
     TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up; // 向上计数
